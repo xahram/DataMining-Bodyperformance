@@ -6,6 +6,43 @@ library(ggplot2)
 library(dplyr)
 library(caTools)
 library(ggfortify)
+library(caret)
+
+
+calculate.accuracy <- function(predictions, ref.labels) {
+  return(length(which(predictions == ref.labels)) / length(ref.labels))
+}
+calculate.w.accuracy <- function(predictions, ref.labels, weights) {
+  lvls <- levels(ref.labels)
+  if (length(weights) != length(lvls)) {
+    stop("Number of weights should agree with the number of classes.")
+  }
+  if (sum(weights) != 1) {
+    stop("Weights do not sum to 1")
+  }
+  accs <- lapply(lvls, function(x) {
+    idx <- which(ref.labels == x)
+    return(calculate.accuracy(predictions[idx], ref.labels[idx]))
+  })
+  acc <- mean(unlist(accs))
+  return(acc)
+}
+acc <- calculate.accuracy(bodyPerformance_DT$V6, bodyPerformance_DT$max)
+print(paste0("Accuracy is: ", round(acc, 2)))
+
+weights <- rep(1 / length(levels(as.factor(bodyPerformance_DT$max))), length(levels(as.factor(bodyPerformance_DT$max))))
+w.acc <- calculate.w.accuracy(bodyPerformance_DT$V6, bodyPerformance_DT$max, weights)
+print(paste0("Weighted accuracy is: ", round(w.acc, 2)))
+
+
+library(caret) # for confusionMatrix function
+cm <- vector("list", length(levels(tree_preds$)))
+for (i in seq_along(cm)) {
+  positive.class <- levels(df$Reference)[i]
+  # in the i-th iteration, use the i-th class as the positive class
+  cm[[i]] <- confusionMatrix(df$Prediction, df$Reference, 
+                             positive = positive.class)
+}
 
 
 # bodyPerformance <- read.csv("./Datasets/marketing_campaign.csv", header= T, sep = '\t')
@@ -64,15 +101,33 @@ train <- subset(bodyperformance_GLM, sample == T)
 test <- subset(bodyperformance_GLM, sample == F)
 
 ### LOGISTIC REGRESSION
+# MULTINOMIAL LOGISTIC REGRESSION
+library(nnet)
+model <- nnet::multinom(bp ~ . , data = train)
+test$predictedagegroup <- predict(model, newdata = test) 
+mean(test$predictedagegroup == test$bp)
 
+new_model <- step(model)
+summary(new_model)
+test$predictedagegroup <- predict(new_model, newdata = test) 
+mean(test$predictedagegroup == test$bp)
+tab1 <- table(test$predictedagegroup, test$bp)
+
+# MISCALSSIFICATION RATE FOR LOGISTIC REGRESSION
+1-sum(diag(tab1))/sum(tab1)
+
+
+# LOGISTIC REGRESION ONE CLASS
 model <- glm(bp ~ . , family = binomial("logit"), data = train)
 summary(model)
 
 new_model <- step(model)
+summary(model)
 summary(new_model)
-
 # Confusion Matrix
 test$predictedagegroup <- predict(new_model, newdata = test, type="response") 
+View(test)
+print(predict(new_model, newdata = test, type="response") )
 table(test$bp, test$predictedagegroup>0.5)
 length(test$predictedagegroup)
 
@@ -126,6 +181,8 @@ View(bodyPerformance_DT)
 
 DT_accuracy <- ifelse(bodyPerformance_DT$V6 == bodyPerformance_DT$max , T, F)
 table(DT_accuracy)
+#confusion matrix
+table(bodyPerformance_DT$max, bodyPerformance_DT$V6)
 
 dt_acc <- 2711 / 4810
 dt_acc
@@ -146,8 +203,11 @@ test <- subset(bodyperformance_GLM, sample == F)
 rf.model <- randomForest(bp ~ body.fat_. + height_cm +  weight_kg + sit.and.bend.forward_cm  +  gripForce + sit.ups.counts + age , data = train, importance= T)
 rf.preds <- predict(rf.model, test)
 # Confusion Matrix of Random Forest
-table(rf.preds, test$bp)
+tab1 <- table(rf.preds, test$bp)
 
+#### MISCLASSIFICATION RATE OF RF
+
+1-sum(diag(tab1))/sum(tab1)
 nrow(test)
 # DT GIVES 0.7390817 percent accuracy in our quest
 
@@ -158,6 +218,8 @@ nrow(test)
 library(class)
 
 ### uSW ORIGINAL BODYPERFORM_GLM AND BODYPERFORMANCE FOR ACCURACY
+bodyperformance_GLM <- scale(bodyperformance_GLM[,-c(2,10,11)])
+View(bodyperformance_GLM)
 sample <- sample.split(bodyperformance_GLM, SplitRatio = 0.7)
 train <- subset(bodyperformance_GLM, sample == T) 
 test <- subset(bodyperformance_GLM, sample == F)
@@ -185,6 +247,12 @@ print(predicted.values)
 View(as.data.frame(predicted.values))
 
 print(table(test$bp == predicted.values))
+# CONFUSION MATRIX KNN
+table(test$bp, predicted.values)
+table(test$bp == predicted.values)
+tab1 <- table(test$bp, predicted.values)
+1- sum(diag(tab1)) / sum(tab1)
+
 
 new.df <- NULL
 new.df <- cbind(test$bp, predicted.values)
@@ -217,15 +285,16 @@ wssplot <- function(data, nc=15, seed=1234){
 km <- kmeans(bodyPerformance[,c(1,6,7)], 5)
 autoplot(km, bodyPerformance[,c(1,6,7)], frame = 1)
 km$centers
+table(bodyperformance_GLM$bp, km$cluster)
 
-View(bodyPerformance)
+View(bodyperformance_GLM)
 # Evaluating KMEANS
 wssplot(bodyPerformance[,-c(2,12)])
 
-km <- kmeans(bodyPerformance[,-c(2,12)], 3)
+km <- kmeans(bodyPerformance[,-c(2,12)], 5)
 autoplot(km, bodyPerformance[,-c(2,12)], frame = 1)
+km$cluster
 km$centers
-
 # KMEANS ACCURACY CHECK
 table(bodyperformance_GLM$bp, km$cluster)
 print(km$cluster)
